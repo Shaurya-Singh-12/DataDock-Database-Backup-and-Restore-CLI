@@ -1,3 +1,4 @@
+[![tests](https://github.com/Shaurya-Singh-12/DataDock-Database-Backup-and-Restore-CLI/actions/workflows/tests.yml/badge.svg)](https://github.com/Shaurya-Singh-12/DataDock-Database-Backup-and-Restore-CLI/actions/workflows/tests.yml)
 # yourtool
 
 A command-line tool that backs up and restores **PostgreSQL** and **MySQL/MariaDB** databases to
