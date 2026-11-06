@@ -1,0 +1,37 @@
+# Anything listed here is never sent to Docker when building the image.
+# Note: unlike .gitignore, a bare '*.log' here matches only the top folder,
+# so use '**/*.log' to match in every folder.
+
+# Secrets and local settings: must never end up inside an image
+config.yaml
+.env
+**/*.log
+
+# Local environments and caches (large, and useless inside the image)
+.venv
+.venv*
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+.pytest_cache
+.coverage
+htmlcov
+build
+dist
+
+# Git and CI files
+.git
+.gitignore
+.github
+
+# Backups and test data
+backups
+backups_demo
+**/*.dump
+
+# Not needed to run the tool
+tests
+docker
+docker-compose*.yml
+Dockerfile
+.dockerignore

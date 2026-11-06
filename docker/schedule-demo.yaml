@@ -1,0 +1,21 @@
+# Demo schedule for `docker compose up -d scheduler`.
+# It runs EVERY MINUTE so you can watch it work. A real schedule would be far less
+# frequent (for example a backup at 02:00 and a weekly prune); see the README, "Scheduling".
+#
+# The database, password and storage come from the environment set in docker-compose.yml.
+schedule:
+  timezone: UTC
+  jobs:
+    - name: demo-backup
+      command: backup
+      cron: "* * * * *"
+
+    - name: demo-verify
+      command: verify
+      cron: "* * * * *"
+
+    - name: demo-prune
+      command: prune
+      cron: "*/3 * * * *"
+      delete_without_asking: true   # nobody is there to confirm, so this must be said explicitly
+      with: {keep_last: 3}

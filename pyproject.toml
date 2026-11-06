@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yourtool"
+version = "0.1.0"
+description = "Back up and restore PostgreSQL and MySQL/MariaDB databases to local or S3 storage, with checksums, retention and scheduling"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["backup", "restore", "postgresql", "mysql", "mariadb", "s3", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: System :: Archiving :: Backup",
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "pyyaml>=6",
+    "tzdata>=2024.1",  # time zone database for schedules; Windows does not ship one
+]
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.36"]
+dev = ["pytest>=8", "pytest-cov>=5", "boto3>=1.36", "moto[s3,server]>=5"]
+
+[project.scripts]
+yourtool = "yourtool.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "integration: needs a real PostgreSQL server (set YOURTOOL_INTEGRATION=1)",
+    "mysql_integration: needs a real MySQL/MariaDB server (set YOURTOOL_INTEGRATION_MYSQL=1)",
+]

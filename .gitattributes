@@ -1,0 +1,6 @@
+# Docker and shell files break if Windows turns their line endings into CRLF.
+Dockerfile text eol=lf
+*.sql text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

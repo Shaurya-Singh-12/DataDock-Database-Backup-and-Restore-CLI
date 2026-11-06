@@ -1,0 +1,121 @@
+name: docker
+
+# Builds the image and runs the demos (PostgreSQL, S3 and MariaDB) from
+# docker-compose.yml end to end.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build the image
+        run: docker compose --profile tools build
+
+      - name: Check the tools inside the image
+        run: |
+          docker compose run --rm -T yourtool --version
+          docker compose run --rm -T --entrypoint pg_dump yourtool --version
+
+      - name: Start the demo database (waits until it is healthy)
+        run: docker compose up -d --wait db
+
+      - name: Back up the demo database
+        run: docker compose run --rm -T yourtool backup
+
+      - name: Verify the stored backup against its checksum
+        run: docker compose run --rm -T yourtool verify
+
+      - name: Restore the backup into a new database
+        run: docker compose run --rm -T yourtool restore --target-db demo_copy --yes --no-prompt --latest
+
+      - name: Check the restored data is complete
+        run: |
+          rows=$(docker compose exec -T db psql -U postgres -d demo_copy -tAc "SELECT count(*) FROM students;")
+          echo "rows in restored students table: $rows"
+          test "$rows" = "3"
+
+      - name: Back up a second time, so there is something to prune
+        run: docker compose run --rm -T yourtool backup
+
+      - name: Preview pruning (deletes nothing)
+        run: docker compose run --rm -T yourtool prune --keep-last 1 --dry-run
+
+      - name: Prune old backups, keeping only the newest
+        run: docker compose run --rm -T yourtool prune --keep-last 1 --yes
+
+      - name: Check exactly one backup is left
+        run: |
+          count=$(docker compose run --rm -T yourtool list --names-only | wc -l)
+          echo "backups left: $count"
+          test "$count" = "1"
+
+      - name: S3 - start the demo S3 server
+        run: docker compose up -d s3
+
+      - name: S3 - create the bucket
+        run: docker compose run --rm -T --entrypoint python yourtool-s3 /create-bucket.py
+
+      - name: S3 - back up PostgreSQL into S3
+        run: docker compose run --rm -T yourtool-s3 backup
+
+      - name: S3 - list and verify the backups
+        run: |
+          docker compose run --rm -T yourtool-s3 list
+          docker compose run --rm -T yourtool-s3 verify
+
+      - name: S3 - restore the latest backup into a new database
+        run: docker compose run --rm -T yourtool-s3 restore --target-db demo_s3 --latest --no-prompt
+
+      - name: S3 - check the restored data is complete
+        run: |
+          rows=$(docker compose exec -T db psql -U postgres -d demo_s3 -tAc "SELECT count(*) FROM students;")
+          echo "rows in restored students table: $rows"
+          test "$rows" = "3"
+
+      - name: MariaDB - start the demo database (waits until it is healthy)
+        run: docker compose up -d --wait mariadb
+
+      - name: MariaDB - back up
+        run: docker compose run --rm -T yourtool-mysql backup
+
+      - name: MariaDB - verify the compressed backup
+        run: docker compose run --rm -T yourtool-mysql verify
+
+      - name: MariaDB - restore into a new database
+        run: docker compose run --rm -T yourtool-mysql restore --target-db demo_copy --yes --no-prompt --latest
+
+      - name: MariaDB - check the restored data is complete
+        run: |
+          rows=$(docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM demo_copy.students"')
+          echo "rows in restored students table: $rows"
+          test "$rows" = "3"
+
+      - name: Scheduler - the demo schedule loads and shows its next runs
+        run: docker compose run --rm -T scheduler schedule list --config /config/schedule-demo.yaml
+
+      - name: Scheduler - run one scheduled job on demand
+        run: docker compose run --rm -T scheduler schedule run-now demo-backup --config /config/schedule-demo.yaml
+
+      - name: Scheduler - run it as a container for a while, then stop it
+        run: |
+          docker compose up -d scheduler
+          sleep 80
+          docker compose logs scheduler
+          docker compose logs scheduler | grep -q "finished OK"
+          if docker compose logs scheduler | grep -q "FAILED"; then echo "a scheduled job failed"; exit 1; fi
+          docker compose stop scheduler
+
+      - name: Show database logs if something failed
+        if: failure()
+        run: docker compose logs db s3 mariadb scheduler
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,165 @@
+# A self-contained demo with two databases and the tool.
+#
+#   PostgreSQL:
+#     docker compose up -d --wait db
+#     docker compose run --rm yourtool backup
+#
+#   PostgreSQL backed up to S3 (a local S3 server, so no AWS account is needed):
+#     docker compose up -d --wait db
+#     docker compose up -d s3
+#     docker compose run --rm --entrypoint python yourtool-s3 /create-bucket.py
+#     docker compose run --rm yourtool-s3 backup
+#     docker compose run --rm yourtool-s3 list
+#
+#   Scheduled backups (runs every minute in this demo; watch it with `logs -f`):
+#     docker compose up -d scheduler
+#     docker compose logs -f scheduler
+#     docker compose stop scheduler
+#
+#   MariaDB (works the same for MySQL):
+#     docker compose up -d --wait mariadb
+#     docker compose run --rm yourtool-mysql backup
+#
+#   Remove everything when finished:
+#     docker compose down -v
+#
+# The passwords below are for this local demo only.
+
+name: yourtool-demo
+
+# Both tool services use the same image; this avoids repeating the build settings.
+x-tool-image: &tool-image
+  build:
+    context: .
+    args:
+      PG_MAJOR: ${PG_MAJOR:-16} # the PostgreSQL client in the image must match the server
+  image: yourtool:dev
+
+services:
+  # ---------------------------------------------------------------- PostgreSQL
+  db:
+    image: postgres:${PG_MAJOR:-16}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      POSTGRES_DB: demo
+    volumes:
+      # Every .sql file in this folder runs the first time the database starts.
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -h 127.0.0.1 makes this check over the network. While the image is still
+      # running its start-up scripts it only listens on a local socket, so this
+      # stays "not ready" until the sample data is really loaded.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d demo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    # Uncomment to reach the database from your own computer (psql, pgAdmin):
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+
+  yourtool:
+    <<: *tool-image
+    # The tool is run on demand, not started by `docker compose up`.
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      YOURTOOL_DB_HOST: db # the service name above is the host name on the compose network
+      YOURTOOL_DB_USER: postgres
+      YOURTOOL_DB_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      YOURTOOL_DB_NAME: demo
+    volumes:
+      - backups:/backups # backups survive between runs
+
+  # An always-on scheduler: backs up, verifies and prunes on the schedule in
+  # docker/schedule-demo.yaml. It is started by name, not by a plain `docker compose up`.
+  scheduler:
+    <<: *tool-image
+    profiles: ["scheduler"]
+    command: ["schedule", "run", "--config", "/config/schedule-demo.yaml"]
+    restart: unless-stopped
+    stop_grace_period: 60s # `docker stop` sends SIGTERM: a job that is running gets time to finish
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      YOURTOOL_DB_HOST: db
+      YOURTOOL_DB_USER: postgres
+      YOURTOOL_DB_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      YOURTOOL_DB_NAME: demo
+    volumes:
+      - backups:/backups
+      - ./docker/schedule-demo.yaml:/config/schedule-demo.yaml:ro
+
+  # ------------------------------------------------------------- S3 (the demo)
+  s3:
+    # moto: a small, maintained server that speaks the S3 protocol, kept in memory.
+    # Fine for a demo. For real use, point the tool at Amazon S3 instead: leave out
+    # the endpoint URL and give it real credentials.
+    image: motoserver/moto:${MOTO_VERSION:-latest}
+
+  yourtool-s3:
+    <<: *tool-image
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+      s3:
+        condition: service_started
+    environment:
+      YOURTOOL_DB_HOST: db
+      YOURTOOL_DB_USER: postgres
+      YOURTOOL_DB_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      YOURTOOL_DB_NAME: demo
+      YOURTOOL_STORAGE_TYPE: s3
+      YOURTOOL_STORAGE_BUCKET: demo-backups
+      YOURTOOL_STORAGE_PREFIX: postgres
+      YOURTOOL_STORAGE_ENDPOINT_URL: http://s3:5000 # the demo server; omit for Amazon S3
+      YOURTOOL_STORAGE_REGION: us-east-1
+      # Dummy keys: the demo server accepts any. Never put real keys in this file.
+      AWS_ACCESS_KEY_ID: demo-access-key
+      AWS_SECRET_ACCESS_KEY: demo-secret-key
+    volumes:
+      - ./docker/create-bucket.py:/create-bucket.py:ro
+
+  # ------------------------------------------------------------------ MariaDB
+  mariadb:
+    image: mariadb:${MARIADB_VERSION:-11.8}
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      MARIADB_DATABASE: demo
+    volumes:
+      - ./docker/init-mariadb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Ships with the image. --connect checks over the network (not the start-up
+      # socket), so it only reports healthy once the sample data has loaded.
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    # Uncomment to reach the database from your own computer:
+    # ports:
+    #   - "127.0.0.1:3307:3306"
+
+  yourtool-mysql:
+    <<: *tool-image
+    profiles: ["tools"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      YOURTOOL_DB_TYPE: mysql
+      YOURTOOL_DB_HOST: mariadb
+      YOURTOOL_DB_USER: root
+      YOURTOOL_DB_PASSWORD: ${DEMO_DB_PASSWORD:-demo-password}
+      YOURTOOL_DB_NAME: demo
+      YOURTOOL_COMPRESSION: gzip # SQL text compresses well; PostgreSQL's format already is
+    volumes:
+      - backups-mysql:/backups
+      - ./docker/mariadb-client.cnf:/etc/mysql/conf.d/yourtool-demo.cnf:ro
+
+volumes:
+  backups:
+  backups-mysql:

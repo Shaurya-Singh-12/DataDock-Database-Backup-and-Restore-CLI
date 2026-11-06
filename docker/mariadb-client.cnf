@@ -1,0 +1,8 @@
+# Demo only. Mounted into the tool container by docker-compose.yml.
+#
+# Recent MariaDB clients try to use TLS and verify the server's certificate by default.
+# The demo database lives on a private Docker network with no certificate, so we turn
+# TLS off for this demo. For a real server over a real network, do the opposite:
+# keep TLS on and put `ssl-ca=/path/to/ca.pem` in a [client] section like this one.
+[client]
+skip-ssl
