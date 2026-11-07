@@ -1,5 +1,5 @@
 [![tests](https://github.com/Shaurya-Singh-12/DataDock-Database-Backup-and-Restore-CLI/actions/workflows/tests.yml/badge.svg)](https://github.com/Shaurya-Singh-12/DataDock-Database-Backup-and-Restore-CLI/actions/workflows/tests.yml)
-# yourtool
+# DataDock
 
 A command-line tool that backs up and restores **PostgreSQL** and **MySQL/MariaDB** databases to
 local folders or **Amazon S3** (and S3-compatible services).
